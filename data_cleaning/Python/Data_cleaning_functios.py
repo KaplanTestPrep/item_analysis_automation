@@ -31,8 +31,8 @@ def db_con():
     user = gt.getpass('Enter db username : ')
     pswd = gt.getpass('Enter db password : ')
     db = input('Enter database : ')
-    host = 'redshift-apps-clusterredshift-19qcp828fizxm.ctebqc6bt0fq.us-east-1.redshift.amazonaws.com'
-    port = '5439'
+    host = input('Enter host : ')
+    port = input('Enter Port number : ')
 
     engine = create_engine('postgresql://' + user + ':' + pswd + '@' + host + ':' + port + '/' + db)
     return engine
