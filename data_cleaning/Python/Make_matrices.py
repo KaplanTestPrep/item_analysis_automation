@@ -39,17 +39,23 @@ def make_user_level_matrices(df,
 
 #display sequence is removed due to for questbank creating multiple rows
 #below also holds for items that are not having constant display sequence across various templates
-def make_item_level_info(df, content_df, results_path, analysis_name, corr_ans):
-    cidf_summary = df.groupby(by=['contentItemId', 'contentItemName', 'activityName', 'templateId'], as_index=False)[['attempted','contentItemId', 'score','dateCreated']].agg({'attempted':'sum',
-                                                                                                        'contentItemId':'size',
+def make_item_level_info(df, content_df, results_path, analysis_name, corr_ans, qbank = False):
+    
+    df = df[df['repeatOmitted']==False].copy()
+    #making a seen field for an item to make count_seen
+    df['itemSeen'] = df['responseStatus']!='not-reached'
+    
+    if(qbank == True):
+        cidf_summary = df.groupby(by=['contentItemId', 'contentItemName', 'activityName', 'templateId'], as_index=False)[['attempted', 'itemSeen', 'score','dateCreated']].agg({'attempted':'sum',
+                                                                                                        'itemSeen':'sum',
                                                                                                         'score':'sum',
                                                                                                         'dateCreated':['min', 'max']}).sort_values(by=['activityName'], ignore_index = True)
     
-    cidf_summary.columns = ['contentItemName', 'activityName', 'templateId', 'count_att', 'count_seen', 'num_correct', 'first_date', 'last_date']
+        cidf_summary.columns = ['contentItemId', 'contentItemName', 'activityName', 'templateId', 'count_att', 'count_seen', 'num_correct', 'first_date', 'last_date']
+        
+        cidf_summary = pd.merge(cidf_summary, content_df)
     
-    cidf_summary = pd.merge(cidf_summary, content_df)
-    
-    cidf_summary = cidf_summary[['contentItemId', 'contentItemName',
+        cidf_summary = cidf_summary[['contentItemId', 'contentItemName',
                              'activityName',
                              'templateId',
                              'count_att',
@@ -61,13 +67,40 @@ def make_item_level_info(df, content_df, results_path, analysis_name, corr_ans):
                              'countchoices',
                              'correctAnswer']].drop_duplicates(ignore_index = True)
     
-    cidf_summary = pd.merge(cidf_summary.drop(columns = ['correctAnswer']), corr_ans, on = ['contentItemId'])
+    else:
+        cidf_summary = df.groupby(by=['contentItemId', 'contentItemName', 'activityName', 'templateId', 'displaySeq'], as_index=False)[['attempted', 'itemSeen', 'score','dateCreated']].agg({'attempted':'sum',
+                                                                                                        'itemSeen':'sum',
+                                                                                                        'score':'sum',
+                                                                                                        'dateCreated':['min', 'max']}).sort_values(by=['activityName'], ignore_index = True)
+    
+        cidf_summary.columns = ['contentItemId', 'contentItemName', 'activityName', 'templateId', 'displaySeq', 'count_att', 'count_seen', 'num_correct', 'first_date', 'last_date']
+        
+        cidf_summary = pd.merge(cidf_summary, content_df, how = 'left')
+    
+        cidf_summary = cidf_summary[['contentItemId', 'contentItemName',
+                             'activityName',
+                             'templateId',
+                            'displaySeq',
+                             'count_att',
+                             'count_seen',
+                             'num_correct',
+                             'first_date',
+                             'last_date',
+                             'interactiontypename',
+                             'countchoices',
+                             'correctAnswer']].drop_duplicates().sort_values(by=['displaySeq'], ignore_index = True)
+        
+    
+    
+    cidf_summary = pd.merge(cidf_summary.drop(columns = ['correctAnswer', 'displaySeq', 'contentItemName']), corr_ans, on = ['contentItemId'])
     
     cidf_summary.to_csv(results_path+analysis_name+'_Content_Item_Info.csv', index = False)
     
     return cidf_summary
 
 def make_activity_level_info(df, results_path, analysis_name):
+    
+    df = df[df['repeatOmitted']==False].copy()
     activity_level_info = df[['studentId', 'activityId', 'dateCreated', 'dateCompleted', 'activityName',
                                 'template_num_attempted', 'template_raw_correct', 'template_pTotal', 'template_pPlus']].drop_duplicates()
 
@@ -77,6 +110,7 @@ def make_activity_level_info(df, results_path, analysis_name):
     
     
 def make_user_level_info(df, results_path, analysis_name, test_map):
+    df = df[df['repeatOmitted']==False].copy()
     panel_calc = df.groupby(by=['studentId', 'activityName'], as_index = False)[['attempted', 'score']].agg({'attempted':['size', 'sum'],
                                                                                    'score':['sum']})
     panel_calc.columns = ['studentId', 'activityName', 'num_seen', 'num_att', 'num_correct']
