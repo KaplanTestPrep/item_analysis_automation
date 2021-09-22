@@ -32,16 +32,20 @@ def db_con():
     pswd = gt.getpass('Enter db password : ')
     db = input('Enter database : ')
     host = input('Enter host : ')
-    port = input('Enter Port number : ')
+    port = input('Enter port number : ')
 
     engine = create_engine('postgresql://' + user + ':' + pswd + '@' + host + ':' + port + '/' + db)
     return engine
 
 
-def describe_dupe_cor_ans(df, use_contentItemName = False):
+def describe_dupe_cor_ans(df, no_correctAnswer = False, use_contentItemName = False):
     if (use_contentItemName == True):
-        cadf = df[df['correctAnswer'].notnull()][['contentItemName', 'correctAnswer']].drop_duplicates()
-        
+        if (no_correctAnswer == True):
+            cadf = df[(df['score']==1) & (df['response']!=0) & (df['response'].notnull())][['contentItemId', 'response']].drop_duplicates().sort_values(by=['contentItemId'], ignore_index = True)
+            cadf.rename(columns={'response' : 'correctAnswer'}, inplace = True)
+        else:
+            cadf = df[df['correctAnswer'].notnull()][['contentItemId', 'correctAnswer']].drop_duplicates()
+       
         if (cadf['contentItemName'].nunique() < df['contentItemName'].nunique()):
             cadf = df[df['score']==1][['contentItemName', 'response']].drop_duplicates()
             cadf.rename(columns={'response':'correctAnswer'}, inplace = True)
@@ -56,7 +60,12 @@ def describe_dupe_cor_ans(df, use_contentItemName = False):
         
         return outputdf
     else:
-        cadf = df[df['correctAnswer'].notnull()][['contentItemId', 'correctAnswer']].drop_duplicates()
+        if (no_correctAnswer == True):
+            cadf = df[(df['score']==1) & (df['response']!=0) & (df['response'].notnull())][['contentItemId', 'response']].drop_duplicates().sort_values(by=['contentItemId'], ignore_index = True)
+            cadf.rename(columns={'response' : 'correctAnswer'}, inplace = True)
+        else:
+            cadf = df[df['correctAnswer'].notnull()][['contentItemId', 'correctAnswer']].drop_duplicates()
+        
         if (cadf['contentItemId'].nunique() < df['contentItemId'].nunique()):
             cadf = df[df['score']==1][['contentItemId', 'response']].drop_duplicates()
             cadf.rename(columns = {'response':'correctAnswer'})
@@ -75,61 +84,83 @@ def describe_dupe_cor_ans(df, use_contentItemName = False):
             outputdf = df_to_summarize.fillna('None').groupby(by=['contentItemId', 'response']).agg({'contentItemId' : ['count']})
             outputdf.columns = 'total'
         return outputdf
+        
+def cor_ans(df):
+    cor_ans_df = df[(df['score']==1) & (df['response']!=0) & (df['response'].notnull())][['contentItemId', 'contentItemName', 'displaySeq', 'response', 'dateCreated']]
+    cor_ans_df = cor_ans_df.groupby(by=['contentItemId', 'contentItemName', 'displaySeq', 'response'])['dateCreated'].agg(['max']).reset_index().sort_values(by=['displaySeq'], ignore_index = True)
+    cor_ans_df['rank'] = cor_ans_df.groupby(by=['contentItemId', 'contentItemName'])['max'].rank(ascending = False)
+    cor_ans_df = cor_ans_df[cor_ans_df['rank']==1].drop(columns=['rank', 'max'])
+    cor_ans_df.rename(columns={'response':'correctAnswer'}, inplace = True)
+    
+    return cor_ans_df
 
 def get_item_cor_ans(df, no_correctAnswer = False, use_contentItemName = False):
     if(use_contentItemName == True):
-        if (no_correctAnswer):
-            cadf = df[(df['score']==1) & (df['response']!=0) & (df['response'].notnull())][['contentItemName', 'response']].drop_duplicates().sort_values(by=['contentItemName']).reset_index(drop=True)
+        if (no_correctAnswer == True):
+            cadf = df[(df['score']==1) & (df['response']!=0) & (df['response'].notnull())][['contentItemName', 'response']].drop_duplicates().sort_values(by=['contentItemName'], ignore_index = True)
             cadf.rename(columns={'response' : 'correctAnswer'}, inplace = True)
             
             if(cadf['contentItemName'].nunique() < cadf.shape[0]):
-                print(describe_dupe_cor_ans(df, use_contentItemName = use_contentItemName))
-                warnings.warn(misc_fns.color.BOLD + 'Duplicate correct answers for some items'  + misc_fns.color.END)
+                print(describe_dupe_cor_ans(df, no_correctAnswer, use_contentItemName = use_contentItemName))
+                print(misc_fns.color.BOLD + 'Duplicate correct answers for some items'  + misc_fns.color.END)
+                dup_cadf = cadf[cadf['contentItemId'].duplicated(keep = False)].reset_index(drop = True)
+                cor_ans_df = cor_ans(df)
+                return cor_ans_df, dup_cadf
             else:
                 print(misc_fns.color.BOLD + 'No duplicate correct answer'  + misc_fns.color.END)
                 dup_cadf = cadf.groupby(by=['contentItemName']).filter(lambda x: len(x)>1).reset_index(drop=True)
-                return cadf, dup_cadf
+                cor_ans_df = cor_ans(df)
+                return cor_ans_df, dup_cadf
         else:
-            cadf = df[df['correctAnswer'].notnull()][['contentItemName', 'correctAnswer']].drop_duplicates().sort_values(by=['contentItemName']).reset_index(drop=True)
+            cadf = df[df['correctAnswer'].notnull()][['contentItemName', 'correctAnswer']].drop_duplicates().sort_values(by=['contentItemName'], ignore_index = True)
             
-            if (cadf['contentItemName'].nunique() < df[df['correctAnswer'].notnull()][['contentItemName']].nunique()):
-                cadf = df[df['score']==1][['contentItemName', 'response']].drop_duplicates().reset_index(drop=True)
+            if (cadf['contentItemName'].nunique() < df[df['correctAnswer'].notnull()]['contentItemName'].nunique()):
+                cadf = df[df['score']==1][['contentItemName', 'response']].drop_duplicates(ignore_index = True)
                 cadf.rename(columns={'response' : 'correctAnswer'}, inplace = True)
             
             if (cadf['contentItemName'].nunique() < cadf.shape[0]):
-                print(describe_dupe_cor_ans(df, use_contentItemName = use_contentItemName))
-                warnings.warn(misc_fns.color.BOLD + 'Duplicate correct answers for some items'  + misc_fns.color.END)
+                print(describe_dupe_cor_ans(df, no_correctAnswer, use_contentItemName = use_contentItemName))
+                print(misc_fns.color.BOLD + 'Duplicate correct answers for some items'  + misc_fns.color.END)
+                dup_cadf = cadf[cadf['contentItemName'].duplicated(keep = False)].reset_index(drop = True)
+                return cadf, dup_cadf
             
             else:
                 print(misc_fns.color.BOLD + 'No duplicate correct answer'  + misc_fns.color.END)
-                dup_cadf = cadf.groupby(by=['contentItemName']).filter(lambda x: len(x)>1).reset_index(drop=True)
+                dup_cadf = cadf[cadf['contentItemName'].duplicated(keep = False)].reset_index(drop=True)
                 return cadf, dup_cadf
     else:
         #use_contentItemName = False
         if (no_correctAnswer):
-            cadf = df[(df['score']==1) & (df['response']!=0) & (df['response'].notnull())][['contentItemId', 'response']].drop_duplicates().sort_values(by=['contentItemId']).reset_index(drop=True)
+            cadf = df[(df['score']==1) & (df['response']!=0) & (df['response'].notnull())][['contentItemId', 'response']].drop_duplicates().sort_values(by=['contentItemId'], ignore_index = True)
             cadf.rename(columns={'response' : 'correctAnswer'}, inplace = True)
+            
             if(cadf['contentItemId'].nunique() < cadf.shape[0]):
-                print(describe_dupe_cor_ans(df, use_contentItemName = use_contentItemName))
-                warnings.warn(misc_fns.color.BOLD + 'Duplicate correct answers for some items'  + misc_fns.color.END)
+                print(describe_dupe_cor_ans(df, no_correctAnswer,use_contentItemName = use_contentItemName))
+                print(misc_fns.color.BOLD + 'Duplicate correct answers for some items'  + misc_fns.color.END)
+                dup_cadf = cadf[cadf['contentItemId'].duplicated(keep = False)].reset_index(drop = True)
+                cor_ans_df = cor_ans(df)
+                return cor_ans_df, dup_cadf
             
             else:
                 print(misc_fns.color.BOLD + 'No duplicate correct answer'  + misc_fns.color.END)
-                dup_cadf = cadf.groupby(by=['contentItemId']).filter(lambda x: len(x)>1).reset_index(drop=True)
-                return cadf, dup_cadf
+                dup_cadf = cadf[cadf['contentItemId'].duplicated(keep = False)].reset_index(drop = True)
+                cor_ans_df = cor_ans(df)
+                return cor_ans_df, dup_cadf
         else:
-            cadf = df[df['correctAnswer'].notnull()][['contentItemId', 'correctAnswer']].drop_duplicates().sort_values(by=['contentItemId']).reset_index(drop=True)
+            cadf = df[df['correctAnswer'].notnull()][['contentItemId', 'correctAnswer']].drop_duplicates().sort_values(by=['contentItemId'], ignore_index = True)
             
-            if (cadf['contentItemId'].nunique() < df[df['correctAnswer'].notnull()][['contentItemId']].nunique()):
-                cadf = df[df['score']==1][['contentItemId', 'response']].drop_duplicates().reset_index(drop=True)
+            if (cadf['contentItemId'].nunique() < df[df['correctAnswer'].notnull()]['contentItemId'].nunique()):
+                cadf = df[df['score']==1][['contentItemId', 'response']].drop_duplicates(ignore_index = True)
                 cadf.rename(columns={'response' : 'correctAnswer'}, inplace = True)
             
             if (cadf['contentItemId'].nunique() < cadf.shape[0]):
-                print(describe_dupe_cor_ans(df, use_contentItemName = use_contentItemName))
-                warnings.warn(misc_fns.color.BOLD + 'Duplicate correct answers for some items'  + misc_fns.color.END)
+                print(describe_dupe_cor_ans(df, no_correctAnswer,use_contentItemName = use_contentItemName))
+                print(misc_fns.color.BOLD + 'Duplicate correct answers for some items'  + misc_fns.color.END)
+                dup_cadf = cadf[cadf['contentItemId'].duplicated(keep = False)].reset_index(drop = True)
+                return cadf, dup_cadf
             else:
                 print(misc_fns.color.BOLD + 'No duplicate correct answer'  + misc_fns.color.END)
-                dup_cadf = cadf.groupby(by=['contentItemId']).filter(lambda x: len(x)>1).reset_index(drop=True)
+                dup_cadf = cadf[cadf['contentItemId'].duplicated(keep = False)].reset_index(drop = True)
                 return cadf, dup_cadf
 
 
@@ -391,6 +422,9 @@ def clean_item_data(data_path = 'C:\\Users\\VImmadisetty\\Downloads\\',
     else:
         respExcl = resp
     
+    
+    
+
     print('Working on Disqualifiers :')
     print('='*30)
     print('User Removal')
@@ -623,6 +657,178 @@ def clean_item_data(data_path = 'C:\\Users\\VImmadisetty\\Downloads\\',
     
     print('Working on Cleaning Rules :')
     print('='*30)
+    
+    
+    print('Response / Score Re-coding')
+    print('-'*20)
+    sec = 'Cleaning Rules'
+    sub_sec = 'Response/Score Re-coding'
+    
+    #2nd and later instances of a repeated item coded as omitted
+    remove_value = False
+    if (repeat_treatment not in ['omit', 'remove', 'ignore']):
+        print("Unknown repeat_treatment value. Allowed values include 'omit','remove', and 'ignore'. Repeat treatment is skipped for now. Repeated questions are recorded as omit by default.")
+    elif(repeat_treatment == 'omit'):
+        remove_value = False
+    elif(repeat_treatment == 'remove'):
+        remove_value = True
+    elif(repeat_treatment == 'ignore'):
+        remove_value = None
+    print('Remove repeat item responses, instead of recoding as omitted = ', remove_value)
+    
+    num_items_omitted = respExcl[respExcl['attempted'] == False].shape[0]
+    num_seq_w_omitted = respExcl[respExcl['attempted'] == False]['sequenceId'].nunique()
+    num_users_w_omitted = respExcl[respExcl['attempted'] == False]['jasperUserId'].nunique()
+    num_items_omitted_new = 0
+    num_seq_w_omitted_new = 0
+    num_users_w_omitted_new = 0
+    print('Original number of responses omitted', num_items_omitted)
+    print('Original number of seq w items omitted', num_seq_w_omitted)
+    print('Original number of users w items omitted', num_users_w_omitted, '\n')
+    
+    
+    #Items with inconsistent keying/suggesting multiple versions of answer key coded as omitted
+    #treating old version of items based on dates
+    if (CI_old_version_dates.empty == False):
+        # If items were under an earlier version the response should be recoded as omitted
+        if(sum(CI_old_version_dates.columns == 'contentItemName')>0):
+            for row, val in enumerate(CI_old_version_dates['contentItemName']):
+                
+                if(CI_remove_before_after=='before'):
+                    date_cond = respExcl['dateCreated'] < CI_old_version_dates['cutoff_date'].loc[row]
+                elif(CI_remove_before_after=='after'):
+                    date_cond = respExcl['dateCreated'] > CI_old_version_dates['cutoff_date'].loc[row]
+                            
+                respExcl = recode_as_omitted(respExcl,
+                                            omit_condition = ((respExcl['contentItemName']==CI_old_version_dates['contentItemName'].loc[row]) & (date_cond)))
+        
+        elif(sum(CI_old_version_dates.columns == 'contentItemId')>0):
+            for row, val in enumerate(CI_old_version_dates['contentItemId']):
+                if(CI_remove_before_after=='before'):
+                    date_cond = respExcl['dateCreated'] < CI_old_version_dates['cutoff_date'].loc[row]
+                elif(CI_remove_before_after=='after'):
+                    date_cond = respExcl['dateCreated'] > CI_old_version_dates['cutoff_date'].loc[row]
+
+                respExcl = recode_as_omitted(respExcl,
+                                            omit_condition = ((respExcl['contentItemId']==CI_old_version_dates['contentItemId'].loc[row]) & (date_cond)))
+        
+        num_items_omitted_new = respExcl[respExcl['attempted'] == False].shape[0]
+        num_seq_w_omitted_new = respExcl[respExcl['attempted'] == False]['sequenceId'].nunique()
+        num_users_w_omitted_new = respExcl[respExcl['attempted'] == False]['jasperUserId'].nunique()
+        print('Item responses under previous version marked as omitted: ', num_items_omitted_new - num_items_omitted)
+        print('Affected sequences : ', num_seq_w_omitted_new - num_seq_w_omitted)
+        print('Affected users : ', num_users_w_omitted_new - num_users_w_omitted, '\n')
+        
+        num_items_omitted = num_items_omitted_new
+        num_seq_w_omitted = num_seq_w_omitted_new
+        num_users_w_omitted = num_users_w_omitted_new
+        
+    
+    #treating old version of items based on item_ids
+    if (CI_old_version_list.empty == False):
+        # If items were under an earlier version the response should be recoded as omitted
+        for row, val in enumerate(CI_old_version_list['contentItemId']):
+            respExcl = recode_as_omitted(respExcl,
+                                       omit_condition = respExcl['contentItemId']==CI_old_version_list['contentItemId'].loc[row])
+        
+        num_items_omitted_new = respExcl[respExcl['attempted'] == False].shape[0]
+        num_seq_w_omitted_new = respExcl[respExcl['attempted'] == False]['sequenceId'].nunique()
+        num_users_w_omitted_new = respExcl[respExcl['attempted'] == False]['jasperUserId'].nunique()
+        print('Item responses under previous version (from id list) marked as omitted: ', num_items_omitted_new - num_items_omitted)
+        print('Affected sequences : ', num_seq_w_omitted_new - num_seq_w_omitted)
+        print('Affected users : ', num_users_w_omitted_new - num_users_w_omitted, '\n')
+        
+        num_items_omitted = num_items_omitted_new
+        num_seq_w_omitted = num_seq_w_omitted_new
+        num_users_w_omitted = num_users_w_omitted_new
+    
+    #treating items answered with old version keys
+    if (CI_old_keys.empty == False):
+        # If items are scored from an earlier answer key, the response should be recoded as omitted
+        for row, val in enumerate(CI_old_keys['contentItemId']):
+            #elig = respExcl[(respExcl['contentItemId']==CI_old_keys['contentItemId'].loc[row]) & 
+            #                                              (respExcl['response'].fillna('None')==CI_old_keys['correctAnswer'].fillna('None').loc[row])]
+            #elig_cnt = elig.shape[0]
+            #omit_already = elig[elig['attempted']==False].shape[0]
+            #print('Total matching', elig_cnt)
+            #print('Already in omitted state for these rows', omit_already)
+    
+            respExcl = recode_as_omitted(respExcl,
+                                        omit_condition = ((respExcl['contentItemId']==CI_old_keys['contentItemId'].loc[row]) & 
+                                                          (respExcl['response'].fillna('None')==CI_old_keys['correctAnswer'].fillna('None').loc[row])))
+        num_items_omitted_new = respExcl[respExcl['attempted']==False].shape[0]
+        num_seq_w_omitted_new = respExcl[respExcl['attempted']==False]['sequenceId'].nunique()
+        num_users_w_omitted_new = respExcl[respExcl['attempted']==False]['jasperUserId'].nunique()
+        
+        print('Already might have removed in earlier rules or already in omit state')
+        print('Item responses with previous version of answer key marked as omitted: ', num_items_omitted_new - num_items_omitted)                                     
+        print('Affected sequences: ', num_seq_w_omitted_new - num_seq_w_omitted)
+        print('Affected users: ', num_users_w_omitted_new - num_users_w_omitted, '\n')
+    
+        num_items_omitted = num_items_omitted_new
+        num_seq_w_omitted = num_seq_w_omitted_new
+        num_users_w_omitted = num_users_w_omitted_new
+    
+    num_seq_current, num_users_current, num_items_current, num_responses_current, cleaning_info = removed_record_count(respExcl, cleaning_info, sec, sub_sec, num_seq_current, num_users_current, num_items_current,
+                                                                                                                       num_responses_current,
+                                                                                 things_to_say = 'Number of sequences removed during item exclusions: ')
+    
+    
+    
+    
+    #2nd and later instances of a repeated item coded as omitted
+    if (remove_value!=None):
+        respExcl, rejects_df = remove_repeat_questions(respExcl, rejects_df, remove = remove_value, add_col = True)
+        
+        num_items_omitted_new = respExcl[respExcl['attempted'] == False].shape[0]
+        num_seq_w_omitted_new = respExcl[respExcl['attempted'] == False]['sequenceId'].nunique()
+        num_users_w_omitted_new = respExcl[respExcl['attempted'] == False]['jasperUserId'].nunique()
+        
+        print('Repeated items marked as omitted: ', num_items_omitted_new - num_items_omitted)
+        print('Current number of responses omitted: ', num_items_omitted_new)
+        print('Current number of seq w items omitted: ', num_seq_w_omitted_new)
+        print('Current number of users w items omitted: ', num_users_w_omitted_new)
+                                             
+        print('Affected sequences: ', num_seq_w_omitted_new - num_seq_w_omitted)
+        print('Affected users: ', num_users_w_omitted_new - num_users_w_omitted, '\n')
+
+        num_items_omitted = num_items_omitted_new
+        num_seq_w_omitted = num_seq_w_omitted_new
+        num_users_w_omitted = num_users_w_omitted_new
+                                             
+        marked_omit_items = respExcl[respExcl['response'] != respExcl['orig_response']]
+        
+        num_seq_current, num_users_current, num_items_current, num_responses_current, cleaning_info = removed_record_count(respExcl, cleaning_info, sec, sub_sec, num_seq_current, num_users_current, num_items_current,
+                                                                                                                           num_responses_current,
+                                                                                     things_to_say = 'Sequences with 2nd and later instances of a repeated item coded as omitted : ')
+    
+    
+    #Last seen response coded as omitted, subsequent responses as not-reached
+    #need to find code for this
+    
+    #Items with time "under" or "over" given threshold of seconds coded as omitted
+    respExcl = timing_exclusion(respExcl, mSec_min_threshold = mSec_min_threshold, sec_min_threshold = sec_min_threshold,
+                               mSec_max_threshold = mSec_max_threshold, sec_max_threshold = sec_max_threshold)
+    #Responses given in less than the threshold allowed will be recoded as omitted
+    num_items_omitted_new = respExcl[respExcl['attempted'] == False].shape[0]
+    num_seq_w_omitted_new = respExcl[respExcl['attempted'] == False]['sequenceId'].nunique()
+    num_users_w_omitted_new = respExcl[respExcl['attempted'] == False]['jasperUserId'].nunique()
+        
+    print('Item response time under threshold of ', mSec_min_threshold, ' mSec or over ', mSec_max_threshold, ' mSec, marked as omitted: ', num_items_omitted_new - num_items_omitted)
+    print('Current number of responses omitted: ', num_items_omitted_new)
+    print('Current number of seq w items omitted: ', num_seq_w_omitted_new)
+    print('Current number of users w items omitted: ', num_users_w_omitted_new)
+                                             
+    print('Affected sequences: ', num_seq_w_omitted_new - num_seq_w_omitted)
+    print('Affected users: ', num_users_w_omitted_new - num_users_w_omitted,'\n')
+    num_items_omitted = num_items_omitted_new
+    num_seq_w_omitted = num_seq_w_omitted_new
+    num_users_w_omitted = num_users_w_omitted_new
+    
+    num_seq_current, num_users_current, num_items_current, num_responses_current, cleaning_info = removed_record_count(respExcl, cleaning_info, sec, sub_sec, num_seq_current, num_users_current, num_items_current,
+                                                                                                                       num_responses_current,
+                                                                                     things_to_say = 'Sequences with Items with time "under" or "over" given threshold of seconds coded as omitted : ')
+    
     print('User Removal')
     print('-'*20)
     sub_sec = 'User Removal'
@@ -1060,176 +1266,6 @@ def clean_item_data(data_path = 'C:\\Users\\VImmadisetty\\Downloads\\',
                                                                                                                            num_responses_current
                                                                                     , things_to_say = 'Sequences with items that have display sequence is null, removed :')
     
-    
-    
-        print('Response / Score Re-coding')
-    print('-'*20)
-    sec = 'Cleaning Rules'
-    sub_sec = 'Response/Score Re-coding'
-    
-    #2nd and later instances of a repeated item coded as omitted
-    remove_value = False
-    if (repeat_treatment not in ['omit', 'remove', 'ignore']):
-        print("Unknown repeat_treatment value. Allowed values include 'omit','remove', and 'ignore'. Repeat treatment is skipped for now. Repeated questions are recorded as omit by default.")
-    elif(repeat_treatment == 'omit'):
-        remove_value = False
-    elif(repeat_treatment == 'remove'):
-        remove_value = True
-    elif(repeat_treatment == 'ignore'):
-        remove_value = None
-    print('Remove repeat item responses, instead of recoding as omitted = ', remove_value)
-    
-    num_items_omitted = respExcl[respExcl['attempted'] == False].shape[0]
-    num_seq_w_omitted = respExcl[respExcl['attempted'] == False]['sequenceId'].nunique()
-    num_users_w_omitted = respExcl[respExcl['attempted'] == False]['jasperUserId'].nunique()
-    num_items_omitted_new = 0
-    num_seq_w_omitted_new = 0
-    num_users_w_omitted_new = 0
-    print('Original number of responses omitted', num_items_omitted)
-    print('Original number of seq w items omitted', num_seq_w_omitted)
-    print('Original number of users w items omitted', num_users_w_omitted, '\n')
-    
-    
-    #Items with inconsistent keying/suggesting multiple versions of answer key coded as omitted
-    #treating old version of items based on dates
-    if (CI_old_version_dates.empty == False):
-        # If items were under an earlier version the response should be recoded as omitted
-        if(sum(CI_old_version_dates.columns == 'contentItemName')>0):
-            for row, val in enumerate(CI_old_version_dates['contentItemName']):
-                
-                if(CI_remove_before_after=='before'):
-                    date_cond = respExcl['dateCreated'] < CI_old_version_dates['cutoff_date'].loc[row]
-                elif(CI_remove_before_after=='after'):
-                    date_cond = respExcl['dateCreated'] > CI_old_version_dates['cutoff_date'].loc[row]
-                            
-                respExcl = recode_as_omitted(respExcl,
-                                            omit_condition = ((respExcl['contentItemName']==CI_old_version_dates['contentItemName'].loc[row]) & (date_cond)))
-        
-        elif(sum(CI_old_version_dates.columns == 'contentItemId')>0):
-            for row, val in enumerate(CI_old_version_dates['contentItemId']):
-                
-                date_cond = respExcl['dateCreated'] < CI_old_version_dates['cutoff_date'].loc[row]
-                respExcl = recode_as_omitted(respExcl,
-                                            omit_condition = ((respExcl['contentItemId']==CI_old_version_dates['contentItemId'].loc[row]) & (date_cond)))
-        
-        num_items_omitted_new = respExcl[respExcl['attempted'] == False].shape[0]
-        num_seq_w_omitted_new = respExcl[respExcl['attempted'] == False]['sequenceId'].nunique()
-        num_users_w_omitted_new = respExcl[respExcl['attempted'] == False]['jasperUserId'].nunique()
-        print('Item responses under previous version marked as omitted: ', num_items_omitted_new - num_items_omitted)
-        print('Affected sequences : ', num_seq_w_omitted_new - num_seq_w_omitted)
-        print('Affected users : ', num_users_w_omitted_new - num_users_w_omitted, '\n')
-        
-        num_items_omitted = num_items_omitted_new
-        num_seq_w_omitted = num_seq_w_omitted_new
-        num_users_w_omitted = num_users_w_omitted_new
-        
-    
-    #treating old version of items based on item_ids
-    if (CI_old_version_list.empty == False):
-        # If items were under an earlier version the response should be recoded as omitted
-        for row, val in enumerate(CI_old_version_list['contentItemId']):
-            respExcl = recode_as_omitted(respExcl,
-                                       omit_condition = respExcl['contentItemId']==CI_old_version_list['contentItemId'].loc[row])
-        
-        num_items_omitted_new = respExcl[respExcl['attempted'] == False].shape[0]
-        num_seq_w_omitted_new = respExcl[respExcl['attempted'] == False]['sequenceId'].nunique()
-        num_users_w_omitted_new = respExcl[respExcl['attempted'] == False]['jasperUserId'].nunique()
-        print('Item responses under previous version (from id list) marked as omitted: ', num_items_omitted_new - num_items_omitted)
-        print('Affected sequences : ', num_seq_w_omitted_new - num_seq_w_omitted)
-        print('Affected users : ', num_users_w_omitted_new - num_users_w_omitted, '\n')
-        
-        num_items_omitted = num_items_omitted_new
-        num_seq_w_omitted = num_seq_w_omitted_new
-        num_users_w_omitted = num_users_w_omitted_new
-    
-    #treating items answered with old version keys
-    if (CI_old_keys.empty == False):
-        # If items are scored from an earlier answer key, the response should be recoded as omitted
-        for row, val in enumerate(CI_old_keys['contentItemId']):
-            #elig = respExcl[(respExcl['contentItemId']==CI_old_keys['contentItemId'].loc[row]) & 
-            #                                              (respExcl['response'].fillna('None')==CI_old_keys['correctAnswer'].fillna('None').loc[row])]
-            #elig_cnt = elig.shape[0]
-            #omit_already = elig[elig['attempted']==False].shape[0]
-            #print('Total matching', elig_cnt)
-            #print('Already in omitted state for these rows', omit_already)
-    
-            respExcl = recode_as_omitted(respExcl,
-                                        omit_condition = ((respExcl['contentItemId']==CI_old_keys['contentItemId'].loc[row]) & 
-                                                          (respExcl['response'].fillna('None')==CI_old_keys['correctAnswer'].fillna('None').loc[row])))
-        num_items_omitted_new = respExcl[respExcl['attempted']==False].shape[0]
-        num_seq_w_omitted_new = respExcl[respExcl['attempted']==False]['sequenceId'].nunique()
-        num_users_w_omitted_new = respExcl[respExcl['attempted']==False]['jasperUserId'].nunique()
-        
-        print('Already might have removed in earlier rules or already in omit state')
-        print('Item responses with previous version of answer key marked as omitted: ', num_items_omitted_new - num_items_omitted)                                     
-        print('Affected sequences: ', num_seq_w_omitted_new - num_seq_w_omitted)
-        print('Affected users: ', num_users_w_omitted_new - num_users_w_omitted, '\n')
-    
-        num_items_omitted = num_items_omitted_new
-        num_seq_w_omitted = num_seq_w_omitted_new
-        num_users_w_omitted = num_users_w_omitted_new
-    
-    num_seq_current, num_users_current, num_items_current, num_responses_current, cleaning_info = removed_record_count(respExcl, cleaning_info, sec, sub_sec, num_seq_current, num_users_current, num_items_current,
-                                                                                                                       num_responses_current,
-                                                                                 things_to_say = 'Number of sequences removed during item exclusions: ')
-    
-    
-    
-    
-    #2nd and later instances of a repeated item coded as omitted
-    if (remove_value!=None):
-        respExcl, rejects_df = remove_repeat_questions(respExcl, rejects_df, remove = remove_value, add_col = True)
-        
-        num_items_omitted_new = respExcl[respExcl['attempted'] == False].shape[0]
-        num_seq_w_omitted_new = respExcl[respExcl['attempted'] == False]['sequenceId'].nunique()
-        num_users_w_omitted_new = respExcl[respExcl['attempted'] == False]['jasperUserId'].nunique()
-        
-        print('Repeated items marked as omitted: ', num_items_omitted_new - num_items_omitted)
-        print('Current number of responses omitted: ', num_items_omitted_new)
-        print('Current number of seq w items omitted: ', num_seq_w_omitted_new)
-        print('Current number of users w items omitted: ', num_users_w_omitted_new)
-                                             
-        print('Affected sequences: ', num_seq_w_omitted_new - num_seq_w_omitted)
-        print('Affected users: ', num_users_w_omitted_new - num_users_w_omitted, '\n')
-
-        num_items_omitted = num_items_omitted_new
-        num_seq_w_omitted = num_seq_w_omitted_new
-        num_users_w_omitted = num_users_w_omitted_new
-                                             
-        marked_omit_items = respExcl[respExcl['response'] != respExcl['orig_response']]
-        
-        num_seq_current, num_users_current, num_items_current, num_responses_current, cleaning_info = removed_record_count(respExcl, cleaning_info, sec, sub_sec, num_seq_current, num_users_current, num_items_current,
-                                                                                                                           num_responses_current,
-                                                                                     things_to_say = 'Sequences with 2nd and later instances of a repeated item coded as omitted : ')
-    
-    
-    #Last seen response coded as omitted, subsequent responses as not-reached
-    #need to find code for this
-    
-    #Items with time "under" or "over" given threshold of seconds coded as omitted
-    respExcl = timing_exclusion(respExcl, mSec_min_threshold = mSec_min_threshold, sec_min_threshold = sec_min_threshold,
-                               mSec_max_threshold = mSec_max_threshold, sec_max_threshold = sec_max_threshold)
-    #Responses given in less than the threshold allowed will be recoded as omitted
-    num_items_omitted_new = respExcl[respExcl['attempted'] == False].shape[0]
-    num_seq_w_omitted_new = respExcl[respExcl['attempted'] == False]['sequenceId'].nunique()
-    num_users_w_omitted_new = respExcl[respExcl['attempted'] == False]['jasperUserId'].nunique()
-        
-    print('Item response time under threshold of ', mSec_min_threshold, ' mSec or over ', mSec_max_threshold, ' mSec, marked as omitted: ', num_items_omitted_new - num_items_omitted)
-    print('Current number of responses omitted: ', num_items_omitted_new)
-    print('Current number of seq w items omitted: ', num_seq_w_omitted_new)
-    print('Current number of users w items omitted: ', num_users_w_omitted_new)
-                                             
-    print('Affected sequences: ', num_seq_w_omitted_new - num_seq_w_omitted)
-    print('Affected users: ', num_users_w_omitted_new - num_users_w_omitted,'\n')
-    num_items_omitted = num_items_omitted_new
-    num_seq_w_omitted = num_seq_w_omitted_new
-    num_users_w_omitted = num_users_w_omitted_new
-    
-    num_seq_current, num_users_current, num_items_current, num_responses_current, cleaning_info = removed_record_count(respExcl, cleaning_info, sec, sub_sec, num_seq_current, num_users_current, num_items_current,
-                                                                                                                       num_responses_current,
-                                                                                     things_to_say = 'Sequences with Items with time "under" or "over" given threshold of seconds coded as omitted : ')
-                                                                                     
-                                                                                     
     print('Remaining number of responses in final output: ', respExcl.shape[0])
     print('Remaining number of sequences in final output: ', num_seq_current)
     print('Remaining number of users in final output: ', num_users_current)
