@@ -7,7 +7,7 @@ fpath <- "..."
 
 ## Sample data to test the code (to run each, uncomment the folder path listed below):
 # -COMLEX/USMLE (Qbank)
-fpath <- "G:\\Shared drives\\Psychometrics\\KNA LAP\\_Programs\\USMLE\\Item Analysis\\2021 COMLEX QBank\\Data"
+# fpath <- "G:\\Shared drives\\Psychometrics\\KNA LAP\\_Programs\\USMLE\\Item Analysis\\2021 COMLEX QBank\\Data"
 # fpath <- "G:\\Shared drives\\Psychometrics\\KNA LAP\\_Programs\\USMLE\\Item Analysis\\2021 USMLE QBank\\Data"
 # -MCAT
 # fpath <- "G:\\Shared drives\\Psychometrics\\KNA LAP\\_Programs\\MCAT\\Item Analysis\\2021_foundational_course\\data\\BioChem"
