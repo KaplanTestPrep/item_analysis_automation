@@ -7,44 +7,53 @@ from sqlalchemy import create_engine, sql
 
 import os
 from openpyxl import load_workbook
-#from miscfns import misc_fns
+from knight import salvador
 
 import re
 import datetime
 import warnings
 import sys
 
-class color:
-   PURPLE = '\033[95m'
-   CYAN = '\033[96m'
-   DARKCYAN = '\033[36m'
-   BLUE = '\033[94m'
-   GREEN = '\033[92m'
-   YELLOW = '\033[93m'
-   RED = '\033[91m'
-   BOLD = '\033[1m'
-   UNDERLINE = '\033[4m'
-   END = '\033[0m'
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy import stats
+from knight.salvador import color
 
-def db_con():
-    #make a connection to the database with your credentials
-    user = gt.getpass('Enter db username : ')
-    pswd = gt.getpass('Enter db password : ')
-    db = input('Enter database : ')
-    host = input('Enter host : ')
-    port = input('Enter port number : ')
+#DRCR Code
+#================================================================================================
 
-    engine = create_engine('postgresql://' + user + ':' + pswd + '@' + host + ':' + port + '/' + db)
-    return engine
-
+#below function will remove dups and sorts the options selected in a response
+#also this will encode alphabet responses to numbers
+#No, need of sorting for items of type "order-interaction" items, need to be careful for such types.
+#better to remove sorting overall as we are in good faith that we capture as is
+def resp_cleaning(resp, re_order = True):
+    #output of this function will be string
+    resp_list = str(resp).split('|')
+    cln_resp_list = []
+    for resp_part in resp_list:
+        #an error may rise here if the response is a string
+        #add np.sort after ','.join function to include sorting feature
+        #to remove space around each choice input
+        resp_part = ','.join([x.strip() for x in resp_part.split(',')])
+        if re_order:
+            cln_resp_part = ','.join(np.sort(list(set([str(ord(x.lower())-96) if x.isalpha() else x for x in resp_part.split(',')]))))
+        else:
+            cln_resp_part = ','.join(list(dict.fromkeys([str(ord(x.lower())-96) if x.isalpha() else x for x in resp_part.split(',')])))
+            
+        cln_resp_list.append(cln_resp_part)
+        
+    cln_resp_list = [x.strip() for x in cln_resp_list]
+    final_resp = '|'.join(cln_resp_list)
+    
+    return final_resp.strip()
 
 def describe_dupe_cor_ans(df, no_correctAnswer = False, use_contentItemName = False):
     if (use_contentItemName == True):
         if (no_correctAnswer == True):
-            cadf = df[(df['score']==1) & (df['response']!=0) & (df['response'].notnull())][['contentItemId', 'response']].drop_duplicates().sort_values(by=['contentItemId'], ignore_index = True)
+            cadf = df[(df['score']==1) & (df['response']!=0) & (df['response'].notnull())][['contentItemName', 'response']].drop_duplicates().sort_values(by=['contentItemName'], ignore_index = True)
             cadf.rename(columns={'response' : 'correctAnswer'}, inplace = True)
         else:
-            cadf = df[df['correctAnswer'].notnull()][['contentItemId', 'correctAnswer']].drop_duplicates()
+            cadf = df[df['correctAnswer'].notnull()][['contentItemName', 'correctAnswer']].drop_duplicates()
        
         if (cadf['contentItemName'].nunique() < df['contentItemName'].nunique()):
             cadf = df[df['score']==1][['contentItemName', 'response']].drop_duplicates()
@@ -53,10 +62,10 @@ def describe_dupe_cor_ans(df, no_correctAnswer = False, use_contentItemName = Fa
         #we get the second instance of duplicate item names with duplicated() fn
         dupe_itemIds = cadf[cadf['contentItemName'].duplicated()]['contentItemName'].unique()
         if (len(dupe_itemIds)==0):
-            sys.exit(misc_fns.color.BOLD + 'No duplicate correct answer'  + misc_fns.color.END)
+            sys.exit(salvador.color.BOLD + 'No duplicate correct answer'  + salvador.color.END)
             
         df_to_summarize = df[(df['contentItemName'].isin(dupe_itemIds)) & (df['score']==1)]
-        outputdf = df_to_summarize.fillna('None').groupby(by=['contentItemName', 'response'])[['score']].agg(['count'])
+        outputdf = df_to_summarize.fillna('None').groupby(by=['contentItemName', 'response'], as_index = False).agg(score_count = ('jasperUserId', 'nunique'), min_date = ('dateCreated', 'min'), max_date = ('dateCreated', 'max'))
         
         return outputdf
     else:
@@ -73,25 +82,33 @@ def describe_dupe_cor_ans(df, no_correctAnswer = False, use_contentItemName = Fa
         dupe_itemIds = cadf[cadf['contentItemId'].duplicated()]['contentItemId'].unique()
         
         if (len(dupe_itemIds)==0):
-            sys.exit(misc_fns.color.BOLD + 'No duplicate correct answers'  + misc_fns.color.END)
+            sys.exit(salvador.color.BOLD + 'No duplicate correct answers'  + salvador.color.END)
         
         df_to_summarize = df[(df['contentItemId'].isin(dupe_itemIds)) & (df['score']==1)]
         
         if(len(df_to_summarize['dateCreated'])!=0):
-            outputdf = df_to_summarize.fillna('None').groupby(by=['contentItemId', 'response']).agg({'contentItemId':'count', 'dateCreated':['min','max']})
-            outputdf.columns = ['total', 'min_date', 'max_date']
+            outputdf = df_to_summarize.fillna('None').groupby(by=['contentItemId', 'response'], as_index = False).agg(total = ('jasperUserId', 'nunique'), min_date = ('dateCreated', 'min'), max_date = ('dateCreated', 'max'))
         else:
-            outputdf = df_to_summarize.fillna('None').groupby(by=['contentItemId', 'response']).agg({'contentItemId' : ['count']})
-            outputdf.columns = 'total'
+            outputdf = df_to_summarize.fillna('None').groupby(by=['contentItemId', 'response'], as_index = False).agg(total = ('jasperUserId', 'nunique'), min_date = ('dateCreated', 'min'), max_date = ('dateCreated', 'max'))
         return outputdf
         
 def cor_ans(df):
-    cor_ans_df = df[(df['score']==1) & (df['response']!=0) & (df['response'].notnull())][['contentItemId', 'contentItemName', 'displaySeq', 'response', 'dateCreated']]
-    cor_ans_df = cor_ans_df.groupby(by=['contentItemId', 'contentItemName', 'displaySeq', 'response'])['dateCreated'].agg(['max']).reset_index().sort_values(by=['displaySeq'], ignore_index = True)
-    cor_ans_df['rank'] = cor_ans_df.groupby(by=['contentItemId', 'contentItemName'])['max'].rank(ascending = False)
-    cor_ans_df = cor_ans_df[cor_ans_df['rank']==1].drop(columns=['rank', 'max'])
-    cor_ans_df.rename(columns={'response':'correctAnswer'}, inplace = True)
+    #cor_ans_df = df[(df['score']==1) & (df['response']!=0) & (df['response'].notnull())][['contentItemId', 'contentItemName', 'displaySeq', 'response', 'dateCreated']]
+    #cor_ans_df = cor_ans_df.groupby(by=['contentItemId', 'contentItemName', 'displaySeq', 'response'])['dateCreated'].agg(['max']).reset_index().sort_values(by=['displaySeq'], ignore_index = True)
+    #cor_ans_df['rank'] = cor_ans_df.groupby(by=['contentItemId', 'contentItemName'])['max'].rank(ascending = False)
+    #cor_ans_df = cor_ans_df[cor_ans_df['rank']==1].drop(columns=['rank', 'max'])
+    #cor_ans_df.rename(columns={'response':'correctAnswer'}, inplace = True)
     
+    cor_ans_df = df[(df['score']==1) & (df['response']!=0) & (df['response'].notnull())][['contentItemId', 'contentItemName', 'displaySeq', 'response', 'dateCreated']].drop_duplicates(ignore_index=True)
+    cor_ans_df = cor_ans_df.groupby(by=['contentItemId', 'contentItemName', 'displaySeq', 'response'], as_index = False).agg(max_dateCreated = ('dateCreated', 'max')).sort_values(by=['displaySeq'], ignore_index = True)
+    cor_ans_df['rank'] = cor_ans_df.groupby(by=['contentItemId', 'contentItemName'])['max_dateCreated'].rank(ascending = False, method = 'first')
+    cor_ans_df = cor_ans_df[cor_ans_df['rank']==1].drop(columns=['rank'])
+
+    #grouping by content item name so that we can keep track of which version of itemname is present in corr_ans df so that same data can be present in content_item_info file
+    cor_ans_df['rank'] = cor_ans_df.groupby(by=['contentItemName'])['max_dateCreated'].rank(ascending = False, method = 'first')
+    cor_ans_df = cor_ans_df[cor_ans_df['rank']==1].drop(columns=['rank'])
+
+    cor_ans_df.rename(columns={'response':'correctAnswer'}, inplace = True)
     return cor_ans_df
 
 def get_item_cor_ans(df, no_correctAnswer = False, use_contentItemName = False):
@@ -101,16 +118,17 @@ def get_item_cor_ans(df, no_correctAnswer = False, use_contentItemName = False):
             cadf.rename(columns={'response' : 'correctAnswer'}, inplace = True)
             
             if(cadf['contentItemName'].nunique() < cadf.shape[0]):
-                print(describe_dupe_cor_ans(df, no_correctAnswer, use_contentItemName = use_contentItemName))
-                print(misc_fns.color.BOLD + 'Duplicate correct answers for some items'  + misc_fns.color.END)
-                dup_cadf = cadf[cadf['contentItemId'].duplicated(keep = False)].reset_index(drop = True)
+                dup_ca_count = describe_dupe_cor_ans(df, no_correctAnswer, use_contentItemName = use_contentItemName)
+                print(dup_ca_count)
+                print(salvador.color.BOLD + 'Duplicate correct answers for some items'  + salvador.color.END)
+                dup_cadf = cadf[cadf['contentItemName'].duplicated(keep = False)].reset_index(drop = True)
                 cor_ans_df = cor_ans(df)
-                return cor_ans_df, dup_cadf
+                return cor_ans_df, dup_cadf, dup_ca_count
             else:
-                print(misc_fns.color.BOLD + 'No duplicate correct answer'  + misc_fns.color.END)
+                print(salvador.color.BOLD + 'No duplicate correct answer'  + salvador.color.END)
                 dup_cadf = cadf.groupby(by=['contentItemName']).filter(lambda x: len(x)>1).reset_index(drop=True)
                 cor_ans_df = cor_ans(df)
-                return cor_ans_df, dup_cadf
+                return cor_ans_df, dup_cadf, None
         else:
             cadf = df[df['correctAnswer'].notnull()][['contentItemName', 'correctAnswer']].drop_duplicates().sort_values(by=['contentItemName'], ignore_index = True)
             
@@ -119,15 +137,16 @@ def get_item_cor_ans(df, no_correctAnswer = False, use_contentItemName = False):
                 cadf.rename(columns={'response' : 'correctAnswer'}, inplace = True)
             
             if (cadf['contentItemName'].nunique() < cadf.shape[0]):
-                print(describe_dupe_cor_ans(df, no_correctAnswer, use_contentItemName = use_contentItemName))
-                print(misc_fns.color.BOLD + 'Duplicate correct answers for some items'  + misc_fns.color.END)
+                dup_ca_count = describe_dupe_cor_ans(df, no_correctAnswer, use_contentItemName = use_contentItemName)
+                print(dup_ca_count)
+                print(salvador.color.BOLD + 'Duplicate correct answers for some items'  + salvador.color.END)
                 dup_cadf = cadf[cadf['contentItemName'].duplicated(keep = False)].reset_index(drop = True)
-                return cadf, dup_cadf
+                return cadf, dup_cadf, dup_ca_count
             
             else:
-                print(misc_fns.color.BOLD + 'No duplicate correct answer'  + misc_fns.color.END)
+                print(salvador.color.BOLD + 'No duplicate correct answer'  + salvador.color.END)
                 dup_cadf = cadf[cadf['contentItemName'].duplicated(keep = False)].reset_index(drop=True)
-                return cadf, dup_cadf
+                return cadf, dup_cadf, None
     else:
         #use_contentItemName = False
         if (no_correctAnswer):
@@ -135,17 +154,18 @@ def get_item_cor_ans(df, no_correctAnswer = False, use_contentItemName = False):
             cadf.rename(columns={'response' : 'correctAnswer'}, inplace = True)
             
             if(cadf['contentItemId'].nunique() < cadf.shape[0]):
-                print(describe_dupe_cor_ans(df, no_correctAnswer,use_contentItemName = use_contentItemName))
-                print(misc_fns.color.BOLD + 'Duplicate correct answers for some items'  + misc_fns.color.END)
+                dup_ca_count = describe_dupe_cor_ans(df, no_correctAnswer,use_contentItemName = use_contentItemName)
+                print(dup_ca_count)
+                print(salvador.color.BOLD + 'Duplicate correct answers for some items'  + salvador.color.END)
                 dup_cadf = cadf[cadf['contentItemId'].duplicated(keep = False)].reset_index(drop = True)
                 cor_ans_df = cor_ans(df)
-                return cor_ans_df, dup_cadf
+                return cor_ans_df, dup_cadf, dup_ca_count
             
             else:
-                print(misc_fns.color.BOLD + 'No duplicate correct answer'  + misc_fns.color.END)
+                print(salvador.color.BOLD + 'No duplicate correct answer'  + salvador.color.END)
                 dup_cadf = cadf[cadf['contentItemId'].duplicated(keep = False)].reset_index(drop = True)
                 cor_ans_df = cor_ans(df)
-                return cor_ans_df, dup_cadf
+                return cor_ans_df, dup_cadf, None
         else:
             cadf = df[df['correctAnswer'].notnull()][['contentItemId', 'correctAnswer']].drop_duplicates().sort_values(by=['contentItemId'], ignore_index = True)
             
@@ -154,14 +174,15 @@ def get_item_cor_ans(df, no_correctAnswer = False, use_contentItemName = False):
                 cadf.rename(columns={'response' : 'correctAnswer'}, inplace = True)
             
             if (cadf['contentItemId'].nunique() < cadf.shape[0]):
-                print(describe_dupe_cor_ans(df, no_correctAnswer,use_contentItemName = use_contentItemName))
-                print(misc_fns.color.BOLD + 'Duplicate correct answers for some items'  + misc_fns.color.END)
+                dup_ca_count = describe_dupe_cor_ans(df, no_correctAnswer,use_contentItemName = use_contentItemName)
+                print(dup_ca_count)
+                print(salvador.color.BOLD + 'Duplicate correct answers for some items'  + salvador.color.END)
                 dup_cadf = cadf[cadf['contentItemId'].duplicated(keep = False)].reset_index(drop = True)
-                return cadf, dup_cadf
+                return cadf, dup_cadf, dup_ca_count
             else:
-                print(misc_fns.color.BOLD + 'No duplicate correct answer'  + misc_fns.color.END)
+                print(salvador.color.BOLD + 'No duplicate correct answer'  + salvador.color.END)
                 dup_cadf = cadf[cadf['contentItemId'].duplicated(keep = False)].reset_index(drop = True)
-                return cadf, dup_cadf
+                return cadf, dup_cadf, None
 
 
 def recode_as_omitted(df, omit_condition = pd.Series(dtype = 'float')):
@@ -356,7 +377,7 @@ def clean_item_data(data_path = 'C:\\Users\\VImmadisetty\\Downloads\\',
                     seq_section_minutes_threshold = None,
                     seq_total_minutes_threshold = None,
                     qbank = False,
-                    min_itmes_per_seq = None,
+                    min_items_per_seq = None,
                     section_calc = True,
                     #seq_item_resp_threshold = None,
                     remove_unscored = False,
@@ -511,7 +532,7 @@ def clean_item_data(data_path = 'C:\\Users\\VImmadisetty\\Downloads\\',
     #Sequences with impossibly scored responses: response=0 and score=1
     if (remove_impo_response_scored == True):
         
-        #making response = 0 for empty responses ang got score
+        #making response = 0 for empty responses and got score
         respExcl.loc[(respExcl['response'].isnull()) & (respExcl['score']==1), 'response'] = 0
         # Excluding sequences that have weird response records - scored as correct without a response
         seq_to_exclude_calc1 = respExcl[(respExcl['score']==1) & (respExcl['response'] == 0)]['sequenceId'].unique()
@@ -579,13 +600,16 @@ def clean_item_data(data_path = 'C:\\Users\\VImmadisetty\\Downloads\\',
                             
     elif (test_map.empty == False and qbank == True):
         temp_record_check = respExcl.shape[0]
-        respExcl = pd.merge(respExcl, pd.DataFrame({'test_minutes_allowed' : test_map['minutesAllowed'],
+        respExcl = pd.merge(respExcl, pd.DataFrame({'sequenceName' : test_map['jasperSequenceName'],
+                                            'test_minutes_allowed' : test_map['minutesAllowed'],
                                             'test_num_ques' : test_map['numQues'],
                                             'test_response_threshold' : test_map['responseThreshold']}))
+        #respExcl['actualNumQues'] = respExcl.groupby(by = ['sequenceId', 'sequenceName'])['contentItemName'].transform('count')
+
         if(respExcl.empty):
             warnings.warn("response df is empty after merging with test_map df")
             
-        #respExcl['actualNumQues'] = respExcl.groupby(by = ['sequenceId', 'sequenceName'])['contentItemName'].transform('count')
+        
         
         if (temp_record_check != respExcl.shape[0]):
             sys.exit('Too many things in test_map, probably')
@@ -745,7 +769,8 @@ def clean_item_data(data_path = 'C:\\Users\\VImmadisetty\\Downloads\\',
     #treating items answered with old version keys
     if (CI_old_keys.empty == False):
         # If items are scored from an earlier answer key, the response should be recoded as omitted
-        for row, val in enumerate(CI_old_keys['contentItemId']):
+        #changing matching field to contentItemName as every time name remaining constant
+        for row, val in enumerate(CI_old_keys['contentItemName']):
             #elig = respExcl[(respExcl['contentItemId']==CI_old_keys['contentItemId'].loc[row]) & 
             #                                              (respExcl['response'].fillna('None')==CI_old_keys['correctAnswer'].fillna('None').loc[row])]
             #elig_cnt = elig.shape[0]
@@ -754,7 +779,7 @@ def clean_item_data(data_path = 'C:\\Users\\VImmadisetty\\Downloads\\',
             #print('Already in omitted state for these rows', omit_already)
     
             respExcl = recode_as_omitted(respExcl,
-                                        omit_condition = ((respExcl['contentItemId']==CI_old_keys['contentItemId'].loc[row]) & 
+                                        omit_condition = ((respExcl['contentItemName']==CI_old_keys['contentItemName'].loc[row]) & 
                                                           (respExcl['response'].fillna('None')==CI_old_keys['correctAnswer'].fillna('None').loc[row])))
         num_items_omitted_new = respExcl[respExcl['attempted']==False].shape[0]
         num_seq_w_omitted_new = respExcl[respExcl['attempted']==False]['sequenceId'].nunique()
@@ -882,7 +907,7 @@ def clean_item_data(data_path = 'C:\\Users\\VImmadisetty\\Downloads\\',
     #Tutor mode sequences
     if(remove_tutor == True):
         #adding data to rejects df
-        temp_rej = respExcl[(respExcl['tutorMode'] == True) | (respExcl['tutorMode'].notnull())][['jasperUserId', 'kbsEnrollmentId', 'templateId']].drop_duplicates()
+        temp_rej = respExcl[(respExcl['tutorMode'] == True)][['jasperUserId', 'kbsEnrollmentId', 'templateId']].drop_duplicates()
         temp_rej['Reason'] = 'Tutor mode sequences'
         rejects_df = pd.concat([rejects_df, temp_rej], ignore_index = True)
         
@@ -981,7 +1006,7 @@ def clean_item_data(data_path = 'C:\\Users\\VImmadisetty\\Downloads\\',
             respExcl = respExcl[~respExcl['sequenceId'].isin(seq_min_thres)]
         num_seq_current, num_users_current, num_items_current, num_responses_current, cleaning_info = removed_record_count(respExcl, cleaning_info, sec, sub_sec, num_seq_current, num_users_current, num_items_current,
                                                                                                                            num_responses_current
-                                                                                    , things_to_say = 'Sequences taking longer than '+ str(seq_total_minutes_threshold) + ' minutes to complete, removed: ')
+                                                                                    , things_to_say = 'Sequences taking longer than '+ salvador.color.BOLD  + str(seq_total_minutes_threshold) +  salvador.color.END + ' minutes to complete, removed: ')
         
     
     #Sequences with fewer items than set threshold removed:
@@ -1020,7 +1045,7 @@ def clean_item_data(data_path = 'C:\\Users\\VImmadisetty\\Downloads\\',
                 seq_below_resp_threshold = respExcl[respexcl['template_num_attempted'] < min_items_per_seq]['sequenceId'].unique()
                 
                 #adding data to rejects df
-                temp_rej = respExcl[respExcl['sequenceId'].isin(seq_belo_resp_threshold)][['jasperUserId', 'kbsEnrollmentId', 'templateId']].drop_duplicates()
+                temp_rej = respExcl[respExcl['sequenceId'].isin(seq_below_resp_threshold)][['jasperUserId', 'kbsEnrollmentId', 'templateId']].drop_duplicates()
                 temp_rej['Reason'] = 'Sequences with items fewer than '+ str(min_items_per_seq*100) + '% of items attempted in a sequence, removed'
                 rejects_df = pd.concat([rejects_df, temp_rej], ignore_index = True)
             
@@ -1285,3 +1310,157 @@ def clean_item_data(data_path = 'C:\\Users\\VImmadisetty\\Downloads\\',
     rejects_df.columns = [col.replace('jasperUser', 'student').replace('sequence', 'activity') for col in rejects_df.columns ]
     
     return respExcl, cleaning_info, rejects_df
+
+
+def make_user_level_matrices(df,
+                  vars_for_matrices,
+                  destination_file_path,
+                  destination_file_name_prefix,
+                  analysis_name,
+                  omit_code = '.',
+                  not_seen_code = '-99',
+                  use_display_order = False,
+                  zero_sec_as_not_reached = False,
+                 qbank = True,
+                 item_order_list = []):
+    
+    if(zero_sec_as_not_reached == True):
+        df = df[df['mSecUsed']>0].copy()
+    
+    for col, mat_nam in vars_for_matrices.items():
+        df = df[df['repeatOmitted']==False].copy()
+        #marking omit values to omit_code here
+        new_col = col+'_omits'
+        df[new_col] = df[col]
+        df.loc[df['attempted']==False, new_col] = omit_code
+        df.loc[df['responseStatus']=='not-reached', new_col] = not_seen_code
+        big_matrix = pd.pivot(data = df, index = 'studentId', columns='contentItemName', values = new_col)
+            
+        #marking not seen items with not_seen_code
+        big_matrix.fillna(value = not_seen_code, inplace = True)
+    
+        if(use_display_order == True):
+            if(qbank == False):
+                CI_ordered = df[['activityName', 'contentItemName', 'displaySeq']].drop_duplicates().sort_values(by=['activityName', 'displaySeq'])['contentItemName']
+                big_matrix = big_matrix[CI_ordered]
+            else:
+                CI_ordered = df[['contentItemName']].drop_duplicates().sort_values(by=['contentItemName'], ignore_index=True)['contentItemName']
+                big_matrix = big_matrix[CI_ordered]
+        
+        if(len(item_order_list)>0):
+            big_matrix = big_matrix[item_order_list]
+        
+        big_matrix.to_csv(destination_file_path+analysis_name+destination_file_name_prefix+mat_nam+'.csv')
+        print('Finished creating matrix for ' + mat_nam)
+    return big_matrix
+
+
+#display sequence is removed due to for questbank creating multiple rows
+#below also holds for items that are not having constant display sequence across various templates
+def make_item_level_info(df, content_df, results_path, analysis_name, corr_ans, qbank = False):
+    
+    df = df[df['repeatOmitted']==False].copy()
+    #making a seen field for an item to make count_seen
+    df['itemSeen'] = df['responseStatus']!='not-reached'
+    
+    if(qbank == True):
+        cidf_summary = df.sort_values(by=['displaySeq']).groupby(by=['contentItemName', 'activityName', 'templateId'], as_index=False, dropna = False).agg(displaySeq = ('displaySeq', lambda x: ', '.join(x.drop_duplicates().astype(str))),
+                                                                                                                                  count_att = ('attempted', 'sum'),
+                                                                                                                                                   count_seen = ('itemSeen', 'sum'),
+                                                                                                                                                   num_correct = ('score', 'sum'),
+                                                                                                                                                   first_date = ('dateCreated', 'min'),
+                                                                                                                                                   last_date = ('dateCreated', 'max')).sort_values(by=['activityName'], ignore_index = True)
+        
+
+    
+        cidf_summary = pd.merge(cidf_summary, content_df)
+    
+        cidf_summary = cidf_summary[['contentItemId', 'contentItemName',
+                             'activityName',
+                             'templateId',
+                             'displaySeq',
+                             'count_att',
+                             'count_seen',
+                             'num_correct',
+                             'first_date',
+                             'last_date',
+                             'interactiontypename',
+                             'countchoices',
+                             'correctAnswer']].drop_duplicates(ignore_index = True)
+    
+    else:
+        cidf_summary = df.sort_values(by=['displaySeq']).groupby(by=['contentItemName', 'activityName', 'templateId'], as_index=False, dropna = False).agg(displaySeq = ('displaySeq', lambda x: ', '.join(x.drop_duplicates().astype(str))),
+                                                                                                                                  count_att = ('attempted', 'sum'),
+                                                                                                                                                   count_seen = ('itemSeen', 'sum'),
+                                                                                                                                                   num_correct = ('score', 'sum'),
+                                                                                                                                                   first_date = ('dateCreated', 'min'),
+                                                                                                                                                   last_date = ('dateCreated', 'max')).sort_values(by=['activityName'], ignore_index = True)
+        
+
+        cidf_summary = pd.merge(cidf_summary, content_df, how = 'left')
+        
+        cidf_summary = cidf_summary[['contentItemId', 'contentItemName',
+                             'activityName',
+                             'templateId',
+                            'displaySeq',
+                             'count_att',
+                             'count_seen',
+                             'num_correct',
+                             'first_date',
+                             'last_date',
+                             'interactiontypename',
+                             'countchoices',
+                             'correctAnswer']].drop_duplicates().sort_values(by=['displaySeq'], ignore_index = True)
+        
+    cidf_summary = pd.merge(cidf_summary.drop(columns = ['correctAnswer', 'displaySeq', 'contentItemId']), corr_ans, on = ['contentItemName'])
+    cidf_summary.to_csv(results_path+analysis_name+'_Content_Item_Info.csv', index = False)
+    
+    return cidf_summary
+
+def make_activity_level_info(df, results_path, analysis_name):
+    
+    df = df[df['repeatOmitted']==False].copy()
+    activity_level_info = df[['studentId', 'activityId', 'dateCreated', 'dateCompleted', 'activityName',
+                                'template_num_attempted', 'template_raw_correct', 'template_pTotal', 'template_pPlus']].drop_duplicates()
+
+    activity_level_info.to_csv(results_path+analysis_name+'_activity_Level_Info.csv', index = False)
+    
+    return activity_level_info
+    
+    
+def make_user_level_info(df, results_path, analysis_name, test_map, qbank = False):
+    df = df[df['repeatOmitted']==False].copy()
+    panel_calc = df.groupby(by=['studentId', 'activityName'], as_index = False, dropna = False).agg(num_seen = ('responseStatus', lambda x: sum(x!='not-reached')),
+                                                                                                    num_att = ('attempted', 'sum'),
+                                                                                                    num_correct = ('score', 'sum'))
+    panel_calc['activityName'] = 'incl_'+panel_calc['activityName'].astype('str')
+
+    panel_calc[['total_seen', 'total_att', 'total_correct']] = panel_calc.groupby(by=['studentId'])[['num_seen', 'num_att', 'num_correct']].transform('sum')
+    panel_calc['num_panel_tests_taken'] = panel_calc.groupby(by=['studentId'])['activityName'].transform('nunique')
+    panel_calc['test_incl'] = 1
+    panel_calc['total_panel'] = sum(test_map['numQues']) if not qbank else df[['studentId', 'activityName', 'actualNumQues']].drop_duplicates(ignore_index = True)['actualNumQues']
+    panel_calc['panel_ptotal'] = panel_calc['total_correct']/panel_calc['total_seen']
+    panel_calc['panel_pplus'] = panel_calc['total_correct']/panel_calc['total_att']
+    
+    
+    test_resp_squished = df.groupby(by=['studentId'], as_index = False, dropna = False).agg(num_seq_taken = ('activityName', 'nunique'),
+                                                                                        test_seen = ('activityName', 'size'),
+                                                                                        test_att = ('attempted', 'sum'),
+                                                                                        test_correct = ('score', 'sum'),
+                                                                                        first_test_date = ('dateCreated', 'min'),
+                                                                                        last_test_date = ('dateCreated', 'max'))
+    
+    test_resp_squished['test_total'] = sum(test_map['numQues']) if not qbank else df[['studentId', 'actualNumQues']].drop_duplicates(ignore_index = True).groupby(by=['studentId'], as_index = False)[['actualNumQues']].agg('sum')['actualNumQues']
+    test_resp_squished['test_ptotal'] = test_resp_squished['test_correct']/test_resp_squished['test_seen']
+    test_resp_squished['test_pplus'] = test_resp_squished['test_correct']/test_resp_squished['test_att']
+    
+    users = pd.merge(test_resp_squished, panel_calc)
+
+    user_info = pd.pivot(data=users,
+        index=['studentId', 'num_panel_tests_taken', 'total_panel', 'total_seen', 'total_att', 'total_correct', 'panel_ptotal', 'panel_pplus'],
+        columns = 'activityName',
+        values = 'num_seq_taken').reset_index()
+
+    user_info.to_csv(results_path+analysis_name+'_User_Level_Info.csv', index = False)
+    
+    return user_info
